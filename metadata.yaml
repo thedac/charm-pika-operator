@@ -1,0 +1,23 @@
+# Copyright 2021 David
+# See LICENSE file for licensing details.
+name: pika-operator
+description: |
+  TEMPLATE-TODO: fill out the charm's description
+summary: |
+  TEMPLATE-TODO: fill out the charm's summary
+
+# TEMPLATE-TODO: replace with containers for your workload (delete for non-k8s)
+containers:
+  pika:
+    resource: pika-image
+
+# TEMPLATE-TODO: each container defined above must specify an oci-image resource
+resources:
+  pika-image:
+    type: oci-image
+    description: OCI image for pika (pikacloud/pika)
+
+requires:
+  amqp:
+    interface: rabbitmq
+
