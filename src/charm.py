@@ -46,7 +46,7 @@ class PikaOperatorCharm(CharmBase):
         # Define an initial Pebble layer configuration
         pebble_layer = {
             "summary": " layer",
-            "description": "pebble config layer for ",
+            "description": "pebble config layer for pika",
             "services": {}
         }
         # Add intial Pebble config layer using the Pebble API
@@ -75,7 +75,8 @@ class PikaOperatorCharm(CharmBase):
 
     def _on_has_amqp_servers(self, event):
         logging.info("Requesting user and vhost")
-        event.request_access(event, self.username, self.vhost)
+        self.amqp_requires.request_access(
+            self.amqp_requires.username, self.amqp_requires.vhost)
         self.unit.status = ActiveStatus()
 
     def _on_ready_amqp_servers(self, event):
@@ -107,6 +108,7 @@ class PikaOperatorCharm(CharmBase):
                 event.set_results({"result": "found '{}'".format(body)})
 
             channel.basic_consume(queue=self.vhost, auto_ack=True, on_message_callback=callback)
+            channel.start_consuming()
             connection.close()
         except Exception as e:
             event.fail(e)

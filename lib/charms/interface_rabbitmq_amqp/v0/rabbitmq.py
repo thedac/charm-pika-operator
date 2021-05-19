@@ -63,27 +63,33 @@ class RabbitMQAMQPRequires(Object):
     def _on_amqp_relation_changed(self, event):
         logging.debug("RabbitMQAMQPRequires on_changed")
         # Validate data on the relation
-        if self.username(event) and self.vhost(event):
+        if self.username and self.vhost:
             self.on.ready_amqp_servers.emit()
 
     def _on_amqp_relation_broken(self, event):
         logging.debug("RabbitMQAMQPRequires on_departed")
         # TODO clear data on the relation
 
-    def username(self, event):
-        return event.relation.data[self.charm.app].get("username")
+    @property
+    def username(self):
+        if self._amqp_rel.data.get(self._amqp_rel.app.name):
+            return self._amqp_rel.data[self._amqp_rel.app.name].get("username")
 
-    def vhost(self, event):
-        return event.relation.data[self.charm.app].get("vhost")
+    @property
+    def vhost(self):
+        if self._amqp_rel.data.get(self._amqp_rel.app.name):
+            return self._amqp_rel.data[self._amqp_rel.app.name].get("vhost")
 
-    def password(self, event):
-        return event.relation.data[self.charm.app].get("password")
+    def password(self):
+        if self._amqp_rel.data.get(self._amqp_rel.app.name):
+            return self._amqp_rel.data[self._amqp_rel.app.name].get("password")
 
-    def request_access(self, event, username, vhost):
+    def request_access(self, username, vhost):
         logging.debug("Requesting AMQP user and vhost")
-        event.relation.data[self.charm.app]["username"] = username
-        event.relation.data[self.charm.app]["vhost"] = (
-            self.vhost(event))
+        if self._amqp_rel.data.get(self._amqp_rel.app.name):
+            self._amqp_rel.data[self._amqp_rel.app.name]['username'] = username
+            self._amqp_rel.data[self._amqp_rel.app.name]['vhost'] = (
+                self.vhost())
 
 
 class HasAMQPClientsEvent(EventBase):
