@@ -41,20 +41,6 @@ class PikaOperatorCharm(CharmBase):
         self.framework.observe(self.on.query_amqp_action, self._on_query_amqp)
 
     def _on_pika_pebble_ready(self, event):
-        # Get a reference the container attribute on the PebbleReadyEvent
-        container = event.workload
-        # Define an initial Pebble layer configuration
-        pebble_layer = {
-            "summary": " layer",
-            "description": "pebble config layer for pika",
-            "services": {}
-        }
-        # Add intial Pebble config layer using the Pebble API
-        container.add_layer("", pebble_layer, combine=True)
-        # Autostart any services that were defined with startup: enabled
-        # container.autostart()
-        # Learn more about statuses in the SDK docs:
-        # https://juju.is/docs/sdk/constructs#heading--statuses
         self.unit.status = ActiveStatus()
 
     @property
@@ -75,12 +61,15 @@ class PikaOperatorCharm(CharmBase):
 
     def _on_has_amqp_servers(self, event):
         logging.info("Requesting user and vhost")
+        logging.warning(dir(event))
         self.amqp_requires.request_access(
             self.amqp_requires.username, self.amqp_requires.vhost)
         self.unit.status = ActiveStatus()
 
     def _on_ready_amqp_servers(self, event):
+        logging.info("XXXX Requesting user and vhost")
         logging.info("Setting password")
+        logging.info(dir(event))
         self._stored.password = event.password
 
     def _on_config_changed(self, _):
