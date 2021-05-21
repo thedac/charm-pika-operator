@@ -18,7 +18,7 @@ from charms.interface_rabbitmq_amqp.v0.rabbitmq import RabbitMQAMQPRequires
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus, WaitingStatus
+from ops.model import ActiveStatus, BlockedStatus, WaitingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -74,44 +74,62 @@ class PikaOperatorCharm(CharmBase):
 
     def _on_ready_amqp_servers(self, event):
         logging.info("Rabbitmq relation complete")
-        if self.hostname and self.password:
-            self._on_update_status(event)
+        self._on_update_status(event)
+        self._on_query_amqp(event)
 
-    def _on_config_changed(self, _):
-        pass
+    def _on_config_changed(self, event):
+        self._on_update_status(event)
 
     def _on_update_status(self, event):
-        if self.hostname and self.password:
-            self.unit.status = ActiveStatus()
+        if not self.amqp_rel:
+            self.unit.status = WaitingStatus("No AMQP relation yet")
+        elif not (self.hostname and self.password):
+            self.unit.status = WaitingStatus("AMQP relation not yet complete.")
         else:
-            self.unit.status = WaitingStatus("Pebble ready waiting on rabbitmq relation data")
+            self.unit.status = ActiveStatus("Ready to run query-amqp action.")
 
     def _on_query_amqp(self, event):
         import pika
 
+        logging.info("Attempting to query AMQP")
         try:
-            logging.info("Attempting to query AMQP")
             credentials = credentials = pika.PlainCredentials(self.username, self.password)
             connection = pika.BlockingConnection(
-                pika.ConnectionParameters('localhost', 5672, self.vhost, credentials))
+                pika.ConnectionParameters(self.hostname, 5672, self.vhost, credentials))
             channel = connection.channel()
 
             # Purge queue
             # http://pika.readthedocs.org/en/latest/modules/channel.html?highlight=purge#pika.channel.Channel.queue_purge
             channel.queue_declare(queue=self.queue)
 
-            channel.basic_publish(exchange='', routing_key=self.vhost, body='Hello World!')
+            channel.basic_publish(exchange='', routing_key=self.queue, body='Hello World!')
             logging.info("Sent 'Hello World!'")
 
             def callback(ch, method, properties, body):
-                logging.info(" [x] Received %r" % body)
-                event.set_results({"result": "found '{}'".format(body)})
+                msg = "Success: Found '{}'".format(body.decode("UTF-8"))
+                logging.info(msg)
+                try:
+                    # We are in an action
+                    logging.info("Setting action results")
+                    event.set_results({"result": msg})
+                except AttributeError:
+                    # Not an action
+                    pass
+                self.unit.status = ActiveStatus(msg)
+                logging.warning("Exiting on purpose.")
+                exit()
 
-            channel.basic_consume(queue=self.vhost, auto_ack=True, on_message_callback=callback)
+            channel.basic_consume(queue=self.queue, auto_ack=True, on_message_callback=callback)
             channel.start_consuming()
             connection.close()
         except Exception as e:
-            event.fail(e)
+            try:
+                # We are in an action
+                event.fail(e)
+            except AttributeError:
+                # Not an action
+                pass
+            self.unit.status = BlockedStatus("Failed to send and recieve AMQP data. See logs.")
 
 
 if __name__ == "__main__":
