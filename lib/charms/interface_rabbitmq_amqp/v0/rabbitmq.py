@@ -5,6 +5,7 @@
 """RabbitMQAMQPProvides and Requires module"""
 
 import logging
+import requests
 
 from ops.framework import (
     StoredState,
@@ -58,38 +59,30 @@ class RabbitMQAMQPRequires(Object):
 
     def _on_amqp_relation_joined(self, event):
         logging.debug("RabbitMQAMQPRequires on_joined")
+        self.event = event
+        self.on.has_amqp_servers.relation_event = event
         self.on.has_amqp_servers.emit()
+        # TODO Move to charm code once the emit has this event attached
+        self.request_access(event, self.charm.username, self.charm.vhost)
 
     def _on_amqp_relation_changed(self, event):
         logging.debug("RabbitMQAMQPRequires on_changed")
-        # Validate data on the relation
-        if self.username and self.vhost:
+        self.event = event
+        self.request_access(event, self.charm.username, self.charm.vhost)
+        if self.password(event):
             self.on.ready_amqp_servers.emit()
 
     def _on_amqp_relation_broken(self, event):
-        logging.debug("RabbitMQAMQPRequires on_departed")
         # TODO clear data on the relation
+        logging.debug("RabbitMQAMQPRequires on_departed")
 
-    @property
-    def username(self):
-        if self._amqp_rel.data.get(self._amqp_rel.app.name):
-            return self._amqp_rel.data[self._amqp_rel.app.name].get("username")
+    def password(self, event):
+        return event.relation.data[self.charm.app].get("password")
 
-    @property
-    def vhost(self):
-        if self._amqp_rel.data.get(self._amqp_rel.app.name):
-            return self._amqp_rel.data[self._amqp_rel.app.name].get("vhost")
-
-    def password(self):
-        if self._amqp_rel.data.get(self._amqp_rel.app.name):
-            return self._amqp_rel.data[self._amqp_rel.app.name].get("password")
-
-    def request_access(self, username, vhost):
+    def request_access(self, event, username, vhost):
         logging.debug("Requesting AMQP user and vhost")
-        if self._amqp_rel.data.get(self._amqp_rel.app.name):
-            self._amqp_rel.data[self._amqp_rel.app.name]['username'] = username
-            self._amqp_rel.data[self._amqp_rel.app.name]['vhost'] = (
-                self.vhost())
+        event.relation.data[self.charm.app]['username'] = username
+        event.relation.data[self.charm.app]['vhost'] = vhost
 
 
 class HasAMQPClientsEvent(EventBase):
@@ -141,23 +134,34 @@ class RabbitMQAMQPProvides(Object):
         # Validate data on the relation
         if self.username(event) and self.vhost(event):
             self.on.ready_amqp_clients.emit()
+            if self.charm.unit.is_leader():
+                self.set_amqp_credentials(
+                    event,
+                    self.username(event),
+                    self.vhost(event))
 
     def _on_amqp_relation_broken(self, event):
         logging.debug("RabbitMQAMQPProvides on_departed")
         # TODO clear data on the relation
 
     def username(self, event):
-        return event.relation.data[self.charm.app].get("username")
+        return event.relation.data[self._amqp_rel.app].get("username")
 
     def vhost(self, event):
-        return event.relation.data[self.charm.app].get("vhost")
+        return event.relation.data[self._amqp_rel.app].get("vhost")
 
-    def set_amqp_credentials(self, event, hostname, username, password):
+    def set_amqp_credentials(self, event, username, vhost):
+        # TODO: Can we move this into the charm code?
         logging.debug("Setting amqp connection information")
-        event.relation.data[self.charm.app]["hostname"] = hostname
-        event.relation.data[self.charm.app]["username"] = username
-        event.relation.data[self.charm.app]["password"] = password
-        # Older clients expect the vhost back
-        event.relation.data[self.charm.app]["vhost"] = (
-            self.vhost(event))
+        try:
+            if not self.charm.does_vhost_exist(vhost):
+                self.charm.create_vhost(vhost)
+            if not self.charm.does_vhost_exist(username):
+                password = self.charm.create_user(username)
+                self.charm.set_user_permissions(username, vhost)
+                event.relation.data[self.charm.app]["password"] = password
+            event.relation.data[self.charm.app]["hostname"] = self.charm.hostname
+        except requests.exceptions.ConnectionError as e:
+            logging.warning("Rabbitmq is not ready. Defering. Errno: {}".format(e.errno))
+            event.defer()
         # TODO TLS Support. The reactive interfaces set ssl_port and ssl_ca

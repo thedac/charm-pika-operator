@@ -18,7 +18,7 @@ from charms.interface_rabbitmq_amqp.v0.rabbitmq import RabbitMQAMQPRequires
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus
+from ops.model import ActiveStatus, WaitingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,10 @@ class PikaOperatorCharm(CharmBase):
         self.framework.observe(
             self.amqp_requires.on.ready_amqp_servers, self._on_ready_amqp_servers)
         self.framework.observe(self.on.query_amqp_action, self._on_query_amqp)
+        self.framework.observe(self.on.update_status, self._on_update_status)
 
     def _on_pika_pebble_ready(self, event):
-        self.unit.status = ActiveStatus()
+        self._on_update_status(event)
 
     @property
     def queue(self):
@@ -56,24 +57,34 @@ class PikaOperatorCharm(CharmBase):
         return "pika"
 
     @property
+    def amqp_rel(self):
+        return self.framework.model.get_relation("amqp")
+
+    @property
     def password(self):
-        return self._stored.password
+        return self.amqp_rel.data[self.amqp_rel.app].get("password")
+
+    @property
+    def hostname(self):
+        return self.amqp_rel.data[self.amqp_rel.app].get("hostname")
 
     def _on_has_amqp_servers(self, event):
         logging.info("Requesting user and vhost")
-        logging.warning(dir(event))
-        self.amqp_requires.request_access(
-            self.amqp_requires.username, self.amqp_requires.vhost)
-        self.unit.status = ActiveStatus()
+        self._on_update_status(event)
 
     def _on_ready_amqp_servers(self, event):
-        logging.info("XXXX Requesting user and vhost")
-        logging.info("Setting password")
-        logging.info(dir(event))
-        self._stored.password = event.password
+        logging.info("Rabbitmq relation complete")
+        if self.hostname and self.password:
+            self._on_update_status(event)
 
     def _on_config_changed(self, _):
         pass
+
+    def _on_update_status(self, event):
+        if self.hostname and self.password:
+            self.unit.status = ActiveStatus()
+        else:
+            self.unit.status = WaitingStatus("Pebble ready waiting on rabbitmq relation data")
 
     def _on_query_amqp(self, event):
         import pika
