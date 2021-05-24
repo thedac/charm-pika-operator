@@ -14,7 +14,7 @@ develop a new k8s charm using the Operator Framework:
 
 import logging
 
-from charms.interface_rabbitmq_amqp.v0.rabbitmq import RabbitMQAMQPRequires
+from charms.thedac_rabbitmq_operator.v0.amqp import RabbitMQAMQPRequires
 from ops.charm import CharmBase
 from ops.framework import StoredState
 from ops.main import main
