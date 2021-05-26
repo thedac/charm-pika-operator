@@ -91,7 +91,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 2
 
 import logging
 import requests
@@ -272,7 +272,7 @@ class RabbitMQAMQPProvides(Object):
         :type EventsBase
         :param username: The requested username
         :type username: str
-        :param vhost: The requested username
+        :param vhost: The requested vhost
         :type vhost: str
         :returns: None
         :rtype: None

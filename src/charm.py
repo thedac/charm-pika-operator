@@ -36,8 +36,7 @@ class PikaOperatorCharm(CharmBase):
         # AMQP Requires
         self.amqp_requires = (RabbitMQAMQPRequires(self, "amqp"))
         self.framework.observe(self.amqp_requires.on.has_amqp_servers, self._on_has_amqp_servers)
-        self.framework.observe(
-            self.amqp_requires.on.ready_amqp_servers, self._on_ready_amqp_servers)
+        self.framework.observe(self.on.amqp_relation_changed, self._on_amqp_relation_changed)
         self.framework.observe(self.on.query_amqp_action, self._on_query_amqp)
         self.framework.observe(self.on.update_status, self._on_update_status)
 
@@ -72,10 +71,13 @@ class PikaOperatorCharm(CharmBase):
         logging.info("Requesting user and vhost")
         self._on_update_status(event)
 
+    def _on_amqp_relation_changed(self, event):
+        logging.info("Rabbitmq relation changed")
+        self._on_update_status(event)
+
     def _on_ready_amqp_servers(self, event):
         logging.info("Rabbitmq relation complete")
         self._on_update_status(event)
-        self._on_query_amqp(event)
 
     def _on_config_changed(self, event):
         self._on_update_status(event)
@@ -86,42 +88,46 @@ class PikaOperatorCharm(CharmBase):
         elif not (self.hostname and self.password):
             self.unit.status = WaitingStatus("AMQP relation not yet complete.")
         else:
-            self.unit.status = ActiveStatus("Ready to run query-amqp action.")
+            self.unit.status = ActiveStatus(
+                "Ready to run query-amqp action on server {}".format(self.hostname))
 
     def _on_query_amqp(self, event):
         import pika
 
-        logging.info("Attempting to query AMQP")
+        logging.info("Attempting to query AMQP at {}:5672".format(self.hostname))
         try:
             credentials = credentials = pika.PlainCredentials(self.username, self.password)
             connection = pika.BlockingConnection(
                 pika.ConnectionParameters(self.hostname, 5672, self.vhost, credentials))
             channel = connection.channel()
 
-            # Purge queue
-            # http://pika.readthedocs.org/en/latest/modules/channel.html?highlight=purge#pika.channel.Channel.queue_purge
             channel.queue_declare(queue=self.queue)
 
-            channel.basic_publish(exchange='', routing_key=self.queue, body='Hello World!')
+            for i in range(20):
+                try:
+                    channel.basic_publish(
+                        exchange='', routing_key=self.queue,
+                        body='Hello World! {}'.format(i))
+                except pika.exceptions.ConnectionWrongStateError:
+                    break
             logging.info("Sent 'Hello World!'")
 
-            def callback(ch, method, properties, body):
-                msg = "Success: Found '{}'".format(body.decode("UTF-8"))
-                logging.info(msg)
-                try:
-                    # We are in an action
-                    logging.info("Setting action results")
-                    event.set_results({"result": msg})
-                except AttributeError:
-                    # Not an action
-                    pass
-                self.unit.status = ActiveStatus(msg)
-                logging.warning("Exiting on purpose.")
-                exit()
+            _results = {}
+            for i in range(30):
+                method_frame, header_frame, body = channel.basic_get(queue=self.queue)
+                if not method_frame or method_frame.NAME == 'Basic.GetEmpty':
+                    connection.close()
+                    break
+                else:
+                    channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+                    msg = "Success: Found '{}'".format(body.decode("UTF-8"))
+                    logging.info(msg)
+                    _results[i] = msg
+                    self.unit.status = ActiveStatus(msg)
 
-            channel.basic_consume(queue=self.queue, auto_ack=True, on_message_callback=callback)
-            channel.start_consuming()
-            connection.close()
+            msg = "Number of messages consumed: {}".format(len(_results))
+            self.unit.status = ActiveStatus(msg)
+            event.set_results({"status": msg, "data": _results})
         except Exception as e:
             try:
                 # We are in an action
